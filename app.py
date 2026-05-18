@@ -119,3 +119,29 @@ try:
 except Exception as e:
     st.error(f"데이터 오류: {e}")
 
+# ==================== 후원 버튼 ====================
+st.markdown("---")
+
+st.markdown("""
+    <div style="text-align: center; margin: 30px 0 20px 0;">
+        <h3>❤️ 이 대시보드가 도움이 되셨다면</h3>
+        <p>개발자에게 커피 한 잔 사주세요 ☕</p>
+    </div>
+""", unsafe_allow_html=True)
+
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    st.markdown(
+        """
+        <a href="https://qr.kakaopay.com/FEeEDozvJ" target="_blank">
+            <img src="https://img.shields.io/badge/카카오페이_후원-FFCD00?style=for-the-badge&logo=kakao&logoColor=black" width="280" height="60">
+        </a>
+        """, 
+        unsafe_allow_html=True
+    )
+
+st.markdown("""
+    <div style="text-align: center; color: #888; font-size: 0.9em; margin-top: 10px;">
+        작은 후원이 큰 동력이 됩니다 🙏
+    </div>
+""", unsafe_allow_html=True)
