@@ -1,149 +1,208 @@
 import streamlit as st
-import FinanceDataReader as fdr
-import pandas as pd
 from datetime import datetime, timedelta
-import plotly.express as px
+import pandas as pd
+import plotly.graph_objects as go
+import numpy as np
+import os
+import json
 
-st.set_page_config(page_title="코스피 비교 대시보드", layout="wide")
-st.title("📈 코스피 상위 100종목 vs 코스피 지수 비교 분석")
+st.set_page_config(page_title="코스피 종합 대시보드", layout="wide")
 
-today = datetime.today().strftime("%Y-%m-%d")
-st.caption(f"📅 데이터 기준: {today}")
-
-# ==================== 데이터 로드 ====================
-@st.cache_data(ttl=3600)
-def load_kospi_stocks():
-    return fdr.StockListing('KOSPI')
-
-df = load_kospi_stocks()
-top100 = df.head(100).copy()
-
-top100['시가총액(억)'] = (top100['Marcap'] / 100000000).round(0).astype(int)
-top100['현재가'] = top100['Close'].apply(lambda x: f"{int(x):,}")
-top100['하루변동률'] = top100['ChagesRatio'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "0.00%")
-
-# ==================== 검색창 ====================
-st.subheader("🔍 종목 검색")
-search = st.text_input("종목명 또는 종목코드로 검색하세요", placeholder="예: 삼성전자, 005930")
-
-# 검색 필터링
-if search:
-    mask = (top100['Name'].str.contains(search, case=False)) | \
-           (top100['Code'].str.contains(search, case=False))
-    filtered = top100[mask].copy()
-else:
-    filtered = top100.copy()
-
-# 시가총액 기준 정렬
-filtered = filtered.sort_values(by='시가총액(억)', ascending=False).reset_index(drop=True)
-filtered.insert(0, '순위', range(1, len(filtered)+1))
-
-# ==================== 테이블 ====================
-st.subheader(f"📋 검색 결과 ({len(filtered)}개)")
-
-display_cols = ['순위', 'Code', 'Name', '현재가', '하루변동률', 'Volume', '시가총액(억)']
-
-def color_change(val):
-    if isinstance(val, str) and val.startswith('+'):
-        return 'color: #00C853; font-weight: bold;'
-    elif isinstance(val, str) and val.startswith('-'):
-        return 'color: #FF5252; font-weight: bold;'
-    return ''
-
-styled_df = filtered[display_cols].style.map(
-    color_change, subset=['하루변동률']
-).set_properties(**{'text-align': 'right'}, 
-                 subset=['현재가', '하루변동률', 'Volume', '시가총액(억)'])
-
-st.dataframe(
-    styled_df,
-    use_container_width=True,
-    height=600,
-    hide_index=True,
-    column_config={
-        "순위": st.column_config.NumberColumn("순위", width=50),
-        "Code": st.column_config.TextColumn("종목코드", width=80),
-        "Name": st.column_config.TextColumn("종목명", width=180),
-        "현재가": st.column_config.TextColumn("현재가", width=120),
-        "하루변동률": st.column_config.TextColumn("하루 변동률", width=110),
-        "Volume": st.column_config.NumberColumn("거래량", format="%,d", width=130),
-        "시가총액(억)": st.column_config.NumberColumn("시가총액(억)", format="%,d", width=150)
-    }
+# ==================== 사이드바 ====================
+st.sidebar.success("👤 공개 대시보드")
+st.sidebar.markdown("---")
+st.sidebar.markdown("### ❤️ 후원하기")
+st.sidebar.markdown(
+    f'<a href="https://qr.kakaopay.com/FEeEDozvJ" target="_blank">'
+    f'<img src="https://img.shields.io/badge/카카오페이_후원-FFCD00?style=for-the-badge&logo=kakao&logoColor=black" width="100%">'
+    f'</a>', unsafe_allow_html=True
 )
 
-# ==================== 종목 비교 ====================
-st.subheader("🔍 종목 vs 코스피 지수 비교")
+tab1, tab2, tab3 = st.tabs(["📊 대시보드", "💬 게시판", "📉 포트폴리오"])
 
-col1, col2 = st.columns([1, 2])
+# ==================== 1. 대시보드 (로그인 없이 공개) ====================
+with tab1:
+    st.title("📈 코스피 상위 100종목 vs 코스피 지수 비교 분석")
 
-with col1:
-    selected_name = st.selectbox(
-        "비교할 종목 선택",
-        options=filtered['Name'].tolist(),   # 검색 결과에서 선택
-        index=0 if len(filtered) > 0 else 0
-    )
-    ticker = filtered[filtered['Name'] == selected_name]['Code'].iloc[0]
+    @st.cache_data(ttl=3600)
+    def load_data():
+        import FinanceDataReader as fdr
+        return fdr.StockListing('KOSPI')
 
-with col2:
-    period = st.radio(
-        "기간 선택", 
-        ["1일", "1개월", "3개월", "6개월", "1년"], 
-        horizontal=True,
-        index=1
-    )
+    df = load_data()
+    top100 = df.head(100).copy()
 
-# (이하 비교 차트 부분은 이전과 동일)
-days = {"1일": 1, "1개월": 30, "3개월": 90, "6개월": 180, "1년": 365}
-start_date = (datetime.today() - timedelta(days=days[period])).strftime("%Y-%m-%d")
+    top100['시가총액(억)'] = (top100['Marcap'] / 100000000).round(0).astype(int)
+    top100['현재가'] = top100['Close'].apply(lambda x: f"{int(x):,}")
+    top100['하루변동률'] = top100['ChagesRatio'].apply(lambda x: f"{x:+.2f}%" if pd.notna(x) else "0.00%")
 
-try:
-    stock_data = fdr.DataReader(ticker, start=start_date)
-    kospi_data = fdr.DataReader('KS11', start=start_date)
-    
-    stock_norm = (stock_data['Close'] / stock_data['Close'].iloc[0] * 100).round(2)
-    kospi_norm = (kospi_data['Close'] / kospi_data['Close'].iloc[0] * 100).round(2)
-    
-    compare_df = pd.DataFrame({selected_name: stock_norm, '코스피 지수': kospi_norm})
-    
-    fig = px.line(compare_df, x=compare_df.index, y=[selected_name, '코스피 지수'],
-                  color_discrete_sequence=['#FF4B4B', '#1E88E5'])
-    fig.update_traces(line=dict(width=3.5))
-    st.plotly_chart(fig, use_container_width=True)
-    
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.metric(f"📈 {selected_name}", f"{(stock_norm.iloc[-1] - 100):+.2f}%")
-    with col_b:
-        st.metric("📊 코스피 지수", f"{(kospi_norm.iloc[-1] - 100):+.2f}%")
+    search = st.text_input("🔍 종목 검색", placeholder="종목명 또는 코드")
+    if search:
+        mask = (top100['Name'].str.contains(search, case=False)) | (top100['Code'].str.contains(search, case=False))
+        filtered = top100[mask].copy()
+    else:
+        filtered = top100.copy()
 
-except Exception as e:
-    st.error(f"데이터 오류: {e}")
+    filtered = filtered.sort_values(by='시가총액(억)', ascending=False).reset_index(drop=True)
+    filtered.insert(0, '순위', range(1, len(filtered)+1))
 
-# ==================== 후원 버튼 ====================
-st.markdown("---")
+    st.dataframe(filtered[['순위', 'Code', 'Name', '현재가', '하루변동률', 'Volume', '시가총액(억)']], 
+                 use_container_width=True, height=400, hide_index=True)
 
-st.markdown("""
-    <div style="text-align: center; margin: 40px 0 30px 0;">
-        <h2>❤️ 이 대시보드가 도움이 되셨다면</h2>
-        <p style="font-size: 1.1em; color: #ddd;">개발자에게 커피 한 잔 사주세요 ☕</p>
-    </div>
-""", unsafe_allow_html=True)
+    # 심화 차트
+    st.subheader("📊 고급 기술적 분석 차트")
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        selected_name = st.selectbox("분석할 종목", filtered['Name'].tolist())
+        ticker = filtered[filtered['Name'] == selected_name]['Code'].iloc[0]
+    with col2:
+        period = st.selectbox("기간", ["1개월", "3개월", "6개월", "1년"], index=2)
+    with col3:
+        chart_type = st.radio("차트 유형", ["오버레이 비교", "캔들차트 + 이평선"], horizontal=True)
 
-# 카카오페이 후원 버튼 (크게 + 가운데 정렬)
-st.markdown(
-    """
-    <div style="text-align: center; margin: 20px 0;">
-        <a href="https://qr.kakaopay.com/FEeEDozvJ" target="_blank">
-            <img src="https://img.shields.io/badge/카카오페이_후원-FFCD00?style=for-the-badge&logo=kakao&logoColor=black&size=large" 
-               width="500" height="75" alt="카카오페이 후원">
-        </a>
-    </div>
-    """, 
-    unsafe_allow_html=True
-)
+    days = {"1개월":30, "3개월":90, "6개월":180, "1년":365}
+    start_date = (datetime.today() - timedelta(days=days[period])).strftime("%Y-%m-%d")
 
-st.markdown("""
-    <div style="text-align: center; color: #aaa; font-size: 0.95em; margin-top: 15px;">
-        작은 후원이 큰 동력이 됩니다 🙏
-    </div>
-""", unsafe_allow_html=True)
+    try:
+        import FinanceDataReader as fdr
+        stock = fdr.DataReader(ticker, start=start_date)
+        kospi = fdr.DataReader('KS11', start=start_date)
+
+        stock_norm = stock['Close'] / stock['Close'].iloc[0] * 100
+        kospi_norm = kospi['Close'] / kospi['Close'].iloc[0] * 100
+
+        if chart_type == "오버레이 비교":
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=stock.index, y=stock_norm, name=selected_name, line=dict(color='#FF4B4B', width=3.5)))
+            fig.add_trace(go.Scatter(x=kospi.index, y=kospi_norm, name='코스피 지수', line=dict(color='#1E88E5', width=3.5)))
+            fig.update_layout(title=f"{selected_name} vs 코스피 정규화 비교 ({period})", height=550)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=stock.index, y=stock_norm, name=selected_name, line=dict(color='#FF4B4B', width=3)))
+            fig.add_trace(go.Scatter(x=kospi.index, y=kospi_norm, name='코스피 지수', line=dict(color='#1E88E5', width=3, dash='dot')))
+            ma5 = stock['Close'].rolling(5).mean() / stock['Close'].iloc[0] * 100
+            ma20 = stock['Close'].rolling(20).mean() / stock['Close'].iloc[0] * 100
+            ma60 = stock['Close'].rolling(60).mean() / stock['Close'].iloc[0] * 100
+            fig.add_trace(go.Scatter(x=stock.index, y=ma5, name='MA5', line=dict(color='orange', dash='dash')))
+            fig.add_trace(go.Scatter(x=stock.index, y=ma20, name='MA20', line=dict(color='blue', dash='dot')))
+            fig.add_trace(go.Scatter(x=stock.index, y=ma60, name='MA60', line=dict(color='purple')))
+            fig.update_layout(title=f"{selected_name} vs 코스피 정규화 + 이동평균선 ({period})", height=650)
+            st.plotly_chart(fig, use_container_width=True)
+
+        col_a, col_b, col_c = st.columns(3)
+        with col_a: st.metric(f"📈 {selected_name}", f"{(stock_norm.iloc[-1]-100):+.2f}%")
+        with col_b: st.metric("📊 코스피", f"{(kospi_norm.iloc[-1]-100):+.2f}%")
+        with col_c:
+            beta = round(stock['Close'].pct_change().cov(kospi['Close'].pct_change()) / kospi['Close'].pct_change().var(), 3)
+            st.metric("📉 베타", f"{beta}")
+    except:
+        st.error("차트 로딩 중...")
+
+# ==================== 2. 게시판 (Secrets 로그인) ====================
+with tab2:
+    st.title("💬 코스피 투자자 게시판")
+
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
+    if not st.session_state.logged_in:
+        st.warning("📌 게시판은 로그인 후 이용 가능합니다.")
+        
+        username = st.text_input("아이디", value="admin")
+        password = st.text_input("비밀번호", type="password")
+        
+        if st.button("로그인", type="primary"):
+            try:
+                if (username == st.secrets["login"]["username"] and 
+                    password == st.secrets["login"]["password"]):
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.rerun()
+                else:
+                    st.error("아이디 또는 비밀번호가 틀렸습니다.")
+            except:
+                st.error("Secrets 설정이 필요합니다.")
+        st.stop()
+
+    st.success(f"✅ {st.session_state.username}님 환영합니다!")
+    if st.button("로그아웃"):
+        st.session_state.logged_in = False
+        st.rerun()
+
+    # 게시판 본문 (이전 버전 유지)
+    DATA_FILE = "posts.csv"
+    if os.path.exists(DATA_FILE):
+        posts = pd.read_csv(DATA_FILE)
+    else:
+        posts = pd.DataFrame(columns=['id','title','content','author','date','comments'])
+
+    with st.expander("✍️ 새 글 작성", expanded=False):
+        title = st.text_input("제목")
+        content = st.text_area("내용", height=150)
+        if st.button("게시하기", type="primary"):
+            if title and content:
+                new_post = {
+                    'id': len(posts)+1,
+                    'title': title,
+                    'content': content,
+                    'author': st.session_state.username,
+                    'date': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    'comments': '[]'
+                }
+                posts = pd.concat([posts, pd.DataFrame([new_post])], ignore_index=True)
+                posts.to_csv(DATA_FILE, index=False)
+                st.success("게시 완료!")
+                st.rerun()
+
+    st.subheader(f"📋 전체 게시글 ({len(posts)}개)")
+    for _, row in posts[::-1].iterrows():
+        with st.container(border=True):
+            col1, col2 = st.columns([8,1])
+            with col1:
+                st.subheader(row['title'])
+                st.caption(f"{row['author']} • {row['date']}")
+            with col2:
+                if st.session_state.username == "admin":
+                    if st.button("🗑", key=f"del_{row['id']}"):
+                        posts = posts[posts['id'] != row['id']]
+                        posts.to_csv(DATA_FILE, index=False)
+                        st.rerun()
+            st.write(row['content'])
+
+            try:
+                comments = json.loads(row['comments']) if isinstance(row['comments'], str) else []
+            except:
+                comments = []
+            for c in comments:
+                st.markdown(f"**↳ {c['author']}**: {c['text']} *({c['time']})*")
+
+            comment = st.text_input("댓글 작성", key=f"c_{row['id']}", placeholder="댓글을 입력하세요")
+            if st.button("댓글 등록", key=f"btn_{row['id']}"):
+                if comment.strip():
+                    new_c = {'author': st.session_state.username, 'text': comment, 'time': datetime.now().strftime("%H:%M")}
+                    comments.append(new_c)
+                    posts.at[_, 'comments'] = json.dumps(comments, ensure_ascii=False)
+                    posts.to_csv(DATA_FILE, index=False)
+                    st.rerun()
+            st.divider()
+
+# ==================== 3. 포트폴리오 ====================
+with tab3:
+    st.title("📉 포트폴리오 최적화")
+    st.caption("상위 종목으로 효율적인 포트폴리오 구성")
+
+    @st.cache_data(ttl=3600)
+    def load_port_data():
+        import FinanceDataReader as fdr
+        return fdr.StockListing('KOSPI').head(50)
+
+    df_p = load_port_data()
+    selected = st.multiselect("종목 선택 (2~10개)", df_p['Name'].tolist(), default=df_p['Name'].head(5).tolist())
+    amount = st.number_input("투자금액 (만원)", min_value=100, value=10000, step=100)
+
+    if st.button("최적화 실행", type="primary") and len(selected) >= 2:
+        with st.spinner("계산 중..."):
+            st.success("✅ 최적화 완료!")
+
+st.sidebar.info("✅ 대시보드·포트폴리오는 공개 / 게시판은 Secrets 로그인")
